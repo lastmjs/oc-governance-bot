@@ -1,0 +1,5 @@
+open-chat-group.did
+open-chat-user.did
+open-chat-shared.did
+.dfx
+target

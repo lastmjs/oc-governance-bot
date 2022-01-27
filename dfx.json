@@ -1,0 +1,9 @@
+{
+    "canisters": {
+        "bot": {
+            "type": "rust",
+            "package": "bot",
+            "candid": "canisters/bot/src/lib.did"
+        }
+    }
+}
