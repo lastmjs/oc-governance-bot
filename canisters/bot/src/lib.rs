@@ -30,6 +30,11 @@ struct CreateCanisterArgs {
 
 }
 
+#[derive(CandidType, Deserialize)]
+struct CurrentUserArgs {
+
+}
+
 #[derive(CandidType, Deserialize, Debug)]
 enum RegisterUserResponse {
     Success,
@@ -115,6 +120,143 @@ struct SendMessageResponseSuccess {
     message_index: u32,
     event_index: u32,
     timestamp: u64
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+enum CurrentUserResponse {
+    UserNotFound,
+    Unconfirmed(CurrentUserResponseUnconfirmed),
+    ConfirmedPendingUsername(ConfirmedPendingUsername),
+    Confirmed(CurrentUserResponseConfirmed),
+    Created(CurrentUserResponseCreated)
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct ConfirmedPendingUsername {
+    canister_creation_status: CanisterCreationStatus,
+    confirmation_state: ConfirmationState
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+enum CanisterCreationStatus {
+    Pending,
+    InProgress,
+    Created
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+enum ConfirmationState {
+    PhoneNumber(PhoneNumber),
+    RegistrationFee(CurrentUserResponseUnconfirmedStateRegistrationFee)
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct CurrentUserResponseUnconfirmed {
+    state: CurrentUserResponseUnconfirmedState
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+enum CurrentUserResponseUnconfirmedState {
+    PhoneNumber(CurrentUserResponseUnconfirmedStatePhoneNumber),
+    RegistrationFee(CurrentUserResponseUnconfirmedStateRegistrationFee)
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+enum CurrentUserResponseUnconfirmedStateRegistrationFee {
+    ICP(ICPRegistrationFee),
+    Cycles(CyclesRegistrationFee)
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct CyclesRegistrationFee {
+    valid_until: u64
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct ICPRegistrationFee {
+    valid_until: u64
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct CurrentUserResponseUnconfirmedStatePhoneNumber {
+    phone_number: PhoneNumber,
+    valid_until: u64
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct PhoneNumber {
+    country_code: u16,
+    number: String
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct CurrentUserResponseConfirmed {
+    username: String
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct CurrentUserResponseCreated {
+    user_id: ic_cdk::export::Principal
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct JoinGroupArgs {
+    chat_id: ic_cdk::export::Principal,
+    as_super_admin: bool
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+enum JoinGroupResponse {
+    Success(GroupChatSummary),
+    AlreadyInGroup,
+    Blocked,
+    GroupNotFound,
+    GroupNotPublic,
+    ParticipantLimitReached(u32),
+    InternalError(String),
+    NotSuperAdmin
+}
+
+#[derive(CandidType, Deserialize, Debug)]
+struct GroupChatSummary {
+    name: String
+}
+
+#[update]
+async fn join_group(canister_id: String) -> String {
+    let call_result: Result<(JoinGroupResponse,), _> = ic_cdk::api::call::call(
+        ic_cdk::export::Principal::from_text("edwiy-ryaaa-aaaaf-abu7q-cai").unwrap(),
+        "join_group_v2",
+        (JoinGroupArgs {
+            chat_id: ic_cdk::export::Principal::from_text(canister_id).unwrap(),
+            as_super_admin: false
+        },)
+    ).await;
+
+    format!("{:#?}", call_result)
+}
+
+#[update]
+async fn get_bot_canister_id() -> String {
+    let call_result: Result<(CurrentUserResponse,), _> = ic_cdk::api::call::call(
+        ic_cdk::export::Principal::from_text("4bkt6-4aaaa-aaaaf-aaaiq-cai").unwrap(),
+        "current_user",
+        (CurrentUserArgs {},)
+    ).await;
+
+    match call_result {
+        Ok(current_user_response_tuple) => {
+            match current_user_response_tuple.0 {
+                CurrentUserResponse::Created(current_user_response_created) => current_user_response_created.user_id.to_string(),
+                CurrentUserResponse::Confirmed(current_user_response_confirmed) => current_user_response_confirmed.username,
+                _ => "nothing".to_string()
+            }
+            // format!("{:#?}", current_user_response_tuple.0)
+        },
+        Err(error) => {
+            error.1
+        }
+    }
 }
 
 #[update]
@@ -266,19 +408,21 @@ fn process_proposals() {
                         if let Some(neuron_id) = proposal_info.clone().id {
                             let neuron_id_clone = neuron_id.clone();
 
+                            let proposal_info_clone = proposal_info.clone();
+
                             ic_cdk::spawn(async move {
-                                let call_result: Result<(SendMessageResponse,), _> = ic_cdk::api::call::call(
-                                    ic_cdk::export::Principal::from_text("7x3dz-5qaaa-aaaaf-abrrq-cai").unwrap(),
-                                    "send_message",
-                                    (SendMessageArgs {
-                                        message_id: neuron_id_clone.id as u128,
-                                        content: MessageContent::Text(TextContent { text: neuron_id_clone.id.to_string() }),
-                                        sender_name: "GovernanceBot".to_string(),
-                                        replies_to: None,
-                                        mentioned: vec![]
-                                    },)
+                                let canister_id = get_group_canister_id(proposal_info.topic);
+
+                                let call_result = send_message_to_group(
+                                    &canister_id,
+                                    neuron_id_clone.id as u128,
+                                    &format_proposal_message(
+                                        neuron_id_clone.id as u128,
+                                        proposal_info.proposal
+                                    )
                                 ).await;
 
+                                // TODO I do not have any retry logic...I would want to include that to be super robust
                                 match call_result {
                                     Ok(send_message_response) => {
                                         SEND_MESSAGE_RESPONSE_REF.with(|send_message_response_ref| {
@@ -304,7 +448,7 @@ fn process_proposals() {
 
                             proposal_info_map.insert(
                                 neuron_id.clone().id,
-                                proposal_info.clone()
+                                proposal_info_clone
                             );
                         }
                     });
@@ -319,4 +463,74 @@ fn process_proposals() {
             }
         }
     });
+}
+
+fn format_proposal_message(
+    id: u128,
+    proposal_option: Option<Proposal>
+) -> String {
+    if let Some(proposal) = proposal_option {
+        let dashboard_url = format!("https://dashboard.internetcomputer.org/proposal/{}", id);
+        
+        let title = match &proposal.title {
+            Some(title) => format!("\n\n{}", title.to_string()),
+            None => "".to_string()
+        };
+    
+        let summary = match &proposal.summary[..] {
+            "" => "".to_string(),
+            _ => format!("\n\n{}", proposal.summary)
+        };
+    
+        let url = match &proposal.url[..] {
+            "" => "".to_string(),
+            _ => format!("\n\n{}", proposal.url)
+        };
+    
+        format!(
+            "{dashboard_url}{title}{summary}{url}",
+            dashboard_url = dashboard_url,
+            title = title,
+            summary = summary,
+            url = url
+        )
+    }
+    else {
+        "".to_string()
+    }
+}
+
+async fn send_message_to_group(
+    canister_id: &str,
+    message_id: u128,
+    content: &str
+) -> Result<(SendMessageResponse,), (ic_cdk::api::call::RejectionCode, String)> {
+    ic_cdk::api::call::call(
+        ic_cdk::export::Principal::from_text(canister_id).unwrap(),
+        "send_message",
+        (SendMessageArgs {
+            message_id,
+            content: MessageContent::Text(TextContent { text: content.to_string() }),
+            sender_name: "GovernanceBot".to_string(),
+            replies_to: None,
+            mentioned: vec![]
+        },)
+    ).await
+}
+
+fn get_group_canister_id(topic: i32) -> String {
+    match topic {
+        0 => "7l7zi-kqaaa-aaaaf-abrtq-cai".to_string(),
+        1 => "6gr5g-fyaaa-aaaaf-abrua-cai".to_string(),
+        2 => "6bq3s-iaaaa-aaaaf-abruq-cai".to_string(),
+        3 => "kcmzb-zaaaa-aaaaf-abscq-cai".to_string(),
+        4 => "klps5-piaaa-aaaaf-absda-cai".to_string(),
+        5 => "kmouj-cqaaa-aaaaf-absdq-cai".to_string(),
+        6 => "nkjgq-xiaaa-aaaaf-absta-cai".to_string(),
+        7 => "evgax-iiaaa-aaaaf-abtba-cai".to_string(),
+        8 => "glmx5-dyaaa-aaaaf-abutq-cai".to_string(),
+        9 => "hgctt-mqaaa-aaaaf-abuua-cai".to_string(),
+        10 => "hbdvh-biaaa-aaaaf-abuuq-cai".to_string(),
+        _ => "not found".to_string()
+    }
 }
