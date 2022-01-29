@@ -4,7 +4,7 @@ This bot runs entirely on the Internet Computer. It listens for open NNS proposa
 
 OpenChat currently isn't open source, but the team shared enough Candid information with me that I was able to get my bot to work. If you want to create your own bot, below I show what it took to get my bot going.
 
-1. [Register the bot as a user on OpenChat](#Register-the-bot-as-a-user-on-OpenChat)
+1. Register the bot as a user on OpenChat
 2. Create the bot's user canister on OpenChat
 3. Join the bot to a group
 4. Test sending a message
