@@ -113,6 +113,7 @@ fn process_proposal_infos(proposal_infos: Vec<ProposalInfo>) {
                 }
 
                 // TODO we may want to implement retry logic in case the send message call fails
+                // TODO this probably only matters for proposals that are open for very short windows of time (like conversion rate proposals)
                 process_proposal_info(
                     neuron_id.id as u128,
                     proposal_info.clone()
