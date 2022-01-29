@@ -1,6 +1,6 @@
 # oc-governance-bot
 
-This bot runs entirely on the Internet Computer. It listens for open NNS proposals, using the IC heartbeat functionality to constantly poll the NNS governance canister. When open proposals are found, their information is put into a text message that is then sent to the corresponding OpenChat group for that proposal's topic.
+This bot runs entirely on the Internet Computer. It listens for open NNS proposals, using the IC heartbeat functionality to constantly poll the NNS governance canister. When an open proposal is found, its information is put into a text message that is then sent to the corresponding OpenChat group for that proposal's topic.
 
 OpenChat currently isn't open source, but the team shared enough Candid information with me that I was able to get my bot to work. If you want to create your own bot, below I show what it took to get my bot going.
 
