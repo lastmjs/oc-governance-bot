@@ -1,5 +1,6 @@
-pub const GOVERNANCE_BOT_USER_CANISTER_ID: &str = "edwiy-ryaaa-aaaaf-abu7q-cai";
 pub const GOVERNANCE_BOT_USER_NAME: &str = "GovernanceBot";
+
+pub const GOVERNANCE_BOT_USER_CANISTER_ID: &str = "edwiy-ryaaa-aaaaf-abu7q-cai";
 pub const GOVERNANCE_CANISTER_ID: &str = "rrkah-fqaaa-aaaaa-aaaaq-cai";
 pub const USER_INDEX_CANISTER_ID: &str = "4bkt6-4aaaa-aaaaf-aaaiq-cai";
 
