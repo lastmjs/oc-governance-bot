@@ -31,7 +31,7 @@ use ic_cdk_macros::{
 };
 use std::{
     cell::RefCell,
-    collections::HashMap
+    collections::HashMap // TODO a BTreeMap should put the keys in order which would be convenient
 };
 use types::{
     MessageContent,
@@ -208,14 +208,24 @@ fn format_proposal_message(
             "" => "".to_string(),
             _ => format!("\n\n{}", proposal.url)
         };
-    
-        format!(
+
+        // TODO I would love to truncate the string immutably, but this is simple for now
+        let mut proposal_message = format!(
             "{dashboard_url}{title}{summary}{url}",
             dashboard_url = dashboard_url,
             title = title,
             summary = summary,
             url = url
-        )
+        );
+
+        if proposal_message.len() > 1000 {
+            proposal_message.truncate(1000);
+        
+            format!("{proposal_message}...", proposal_message = proposal_message)
+        }
+        else {
+            proposal_message
+        }
     }
     else {
         "".to_string()
