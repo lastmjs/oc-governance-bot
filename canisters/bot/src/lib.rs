@@ -45,7 +45,7 @@ use types::{
 };
 
 thread_local! {
-    static LAST_PROPOSAL_ID_SENT_REF_CELL: RefCell<u64> = RefCell::new(43083);
+    static LAST_PROPOSAL_ID_SENT_REF_CELL: RefCell<u64> = RefCell::new(43089);
     static LIST_PROPOSALS_ERROR_REF_CELL: RefCell<(u64, String)> = RefCell::new((0, String::from("")));
     static PREVIOUS_PROCESS_TIME_REF_CELL: RefCell<u64> = RefCell::new(0);
     static SEND_MESSAGE_RESPONSE_REF_CELL: RefCell<(u64, String)> = RefCell::new((0, String::from("")));
