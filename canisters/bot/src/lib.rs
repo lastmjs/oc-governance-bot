@@ -13,6 +13,8 @@ mod types;
 use constants::{
     GOVERNANCE_BOT_USER_NAME,
     GOVERNANCE_CANISTER_ID,
+    INITIAL_PROPOSAL_LIMIT,
+    PROCESS_INTERVAL,
     TOPIC_0_GROUP_CANISTER_ID,
     TOPIC_1_GROUP_CANISTER_ID,
     TOPIC_2_GROUP_CANISTER_ID,
@@ -25,15 +27,15 @@ use constants::{
     TOPIC_9_GROUP_CANISTER_ID,
     TOPIC_10_GROUP_CANISTER_ID
 };
+use ic_cdk::api::time;
 use ic_cdk_macros::{
     heartbeat,
     query
 };
-use std::{
-    cell::RefCell,
-    collections::HashMap // TODO a BTreeMap should put the keys in order which would be convenient
-};
+use std::cell::RefCell;
 use types::{
+    ListProposalInfo,
+    ListProposalInfoResponse,
     MessageContent,
     Proposal,
     ProposalInfo,
@@ -43,112 +45,178 @@ use types::{
 };
 
 thread_local! {
-    static PROPOSAL_IDS_MAP_REF: RefCell<HashMap<u64, ()>> = RefCell::new(HashMap::new()); // TODO eventually we will want to cull this, we do not to keep them around forever
-    static PENDING_PROPOSALS_ERROR_REF: RefCell<String> = RefCell::new(String::from(""));
-    static SEND_MESSAGE_RESPONSE_REF: RefCell<String> = RefCell::new(String::from(""));
+    static LAST_PROPOSAL_ID_SENT_REF_CELL: RefCell<u64> = RefCell::new(43089);
+    static LIST_PROPOSALS_ERROR_REF_CELL: RefCell<(u64, String)> = RefCell::new((0, String::from("")));
+    static PREVIOUS_PROCESS_TIME_REF_CELL: RefCell<u64> = RefCell::new(0);
+    static SEND_MESSAGE_RESPONSE_REF_CELL: RefCell<(u64, String)> = RefCell::new((0, String::from("")));
 }
 
 #[heartbeat]
 fn heartbeat() {
-    process_proposals();
+    PREVIOUS_PROCESS_TIME_REF_CELL.with(|previous_process_time_ref_cell| {
+        let mut previous_process_time_ref = previous_process_time_ref_cell.borrow_mut();
+        if *previous_process_time_ref == 0 {
+            *previous_process_time_ref = time();
+        }
+
+        if time() > *previous_process_time_ref + PROCESS_INTERVAL {
+            process_proposals();
+            *previous_process_time_ref = time();
+        }
+    });
 }
 
 #[query]
-fn proposal_ids() -> Vec<u64> {
-    PROPOSAL_IDS_MAP_REF.with(|proposal_ids_map_ref| proposal_ids_map_ref.borrow().clone().into_keys().collect::<Vec<u64>>())
+fn previous_process_time() -> u64 {
+    PREVIOUS_PROCESS_TIME_REF_CELL.with(|previous_process_time_ref_cell| *previous_process_time_ref_cell.borrow())
 }
 
 #[query]
-fn pending_proposals_error() -> String {
-    PENDING_PROPOSALS_ERROR_REF.with(|pending_proposals_error_ref| pending_proposals_error_ref.borrow().clone())
+fn last_proposal_id_sent() -> u64 {
+    LAST_PROPOSAL_ID_SENT_REF_CELL.with(|last_proposal_id_sent_ref_cell| *last_proposal_id_sent_ref_cell.borrow())
 }
 
 #[query]
-fn send_message_response() -> String {
-    SEND_MESSAGE_RESPONSE_REF.with(|send_message_response_ref| send_message_response_ref.borrow().clone())
+fn list_proposals_error() -> (u64, String) {
+    LIST_PROPOSALS_ERROR_REF_CELL.with(|list_proposals_error_ref_cell| list_proposals_error_ref_cell.borrow().clone())
+}
+
+#[query]
+fn send_message_response() -> (u64, String) {
+    SEND_MESSAGE_RESPONSE_REF_CELL.with(|send_message_response_ref_cell| send_message_response_ref_cell.borrow().clone())
 }
 
 fn process_proposals() {
-    ic_cdk::spawn(async {
-        let proposals_infos_result = get_proposal_infos().await;
-        
+    ic_cdk::spawn(async {    
+        let proposals_infos_result = get_proposal_infos(INITIAL_PROPOSAL_LIMIT).await;
+            
         match proposals_infos_result {
             Ok(proposal_infos) => {
-                process_proposal_infos(proposal_infos);
+                process_proposal_infos(proposal_infos).await;
             },
             Err(error) => {
-                PENDING_PROPOSALS_ERROR_REF.with(|pending_proposals_error_ref| {
-                    let mut pending_proposals_error = pending_proposals_error_ref.borrow_mut();
-
-                    *pending_proposals_error = error;
+                LIST_PROPOSALS_ERROR_REF_CELL.with(|list_proposals_error_ref_cell| {
+                    let mut list_proposals_error_ref = list_proposals_error_ref_cell.borrow_mut();
+    
+                    *list_proposals_error_ref = (time(), error);
                 })
             }
         }
     });
 }
 
-async fn get_proposal_infos() -> Result<Vec<ProposalInfo>, String> {
-    let call_result: Result<(Vec<ProposalInfo>,), _> = ic_cdk::api::call::call(
+// TODO recursive async functions are complicated and might lead to some issues on the IC (call stack)
+// TODO easier to go with the less functional iterative method for now
+async fn get_proposal_infos(limit: u32) -> Result<Vec<ProposalInfo>, String> {
+    let last_proposal_id_sent = LAST_PROPOSAL_ID_SENT_REF_CELL.with(|last_proposal_id_sent_ref_cell| *last_proposal_id_sent_ref_cell.borrow());
+
+    let mut proposal_infos = list_proposals(limit).await?;
+    let mut index = 1;
+
+    while proposal_infos_contains_last_proposal(
+        last_proposal_id_sent,
+        &proposal_infos
+    ) == false {
+        proposal_infos = list_proposals(limit + index).await?;
+        index += 1;
+
+    }
+
+    let mut proposal_infos_without_last_proposal = remove_proposal_from_proposal_infos(
+        last_proposal_id_sent,
+        proposal_infos
+    );
+
+    proposal_infos_without_last_proposal.reverse();
+
+    Ok(proposal_infos_without_last_proposal)
+}
+
+fn proposal_infos_contains_last_proposal(
+    last_proposal_id: u64,
+    proposal_infos: &Vec<ProposalInfo>
+) -> bool {
+    proposal_infos.into_iter().find(|proposal_info| {
+        if let Some(neuron_id) = &proposal_info.id {
+            neuron_id.id == last_proposal_id
+        }
+        else {
+            false
+        }
+    })
+    .is_some()
+}
+
+fn remove_proposal_from_proposal_infos(
+    proposal_id: u64,
+    proposal_infos: Vec<ProposalInfo>
+) -> Vec<ProposalInfo> {
+    proposal_infos.into_iter().filter(|proposal_info| {
+        if let Some(neuron_id) = &proposal_info.id {
+            neuron_id.id != proposal_id
+        }
+        else {
+            true
+        }
+    })
+    .collect::<Vec<ProposalInfo>>()
+}
+
+async fn list_proposals(limit: u32) -> Result<Vec<ProposalInfo>, String> {
+    let call_result: Result<(ListProposalInfoResponse,), _> = ic_cdk::api::call::call(
         ic_cdk::export::Principal::from_text(GOVERNANCE_CANISTER_ID).unwrap(),
-        "get_pending_proposals",
-        ()
+        "list_proposals",
+        (ListProposalInfo {
+            include_reward_status: vec![],
+            before_proposal: None,
+            limit,
+            exclude_topic: vec![],
+            include_status: vec![]
+        },)
     ).await;
 
     match call_result {
-        Ok(value) => Ok(value.0),
+        Ok(value) => Ok(value.0.proposal_info),
         Err(error) => Err(error.1)
     }
 }
 
-fn process_proposal_infos(proposal_infos: Vec<ProposalInfo>) {
-    PROPOSAL_IDS_MAP_REF.with(|proposal_ids_map_ref| {
-        let mut proposal_ids_map = proposal_ids_map_ref.borrow_mut();
+async fn process_proposal_infos(proposal_infos: Vec<ProposalInfo>) {
+    for proposal_info in proposal_infos.iter() {
+        if let Some(neuron_id) = &proposal_info.id {
+            process_proposal_info(
+                neuron_id.id as u128,
+                proposal_info.clone()
+            ).await;
 
-        proposal_infos.into_iter().for_each(|proposal_info| {
-            if let Some(neuron_id) = &proposal_info.id {
-                let proposal_already_processed = proposal_ids_map.contains_key(&neuron_id.id);
+            LAST_PROPOSAL_ID_SENT_REF_CELL.with(|last_proposal_id_sent_ref_cell| {
+                let mut last_proposal_id_sent_ref = last_proposal_id_sent_ref_cell.borrow_mut();
 
-                if proposal_already_processed == true {
-                    return;
-                }
-
-                // TODO we may want to implement retry logic in case the send message call fails
-                // TODO this probably only matters for proposals that are open for very short windows of time (like conversion rate proposals)
-                process_proposal_info(
-                    neuron_id.id as u128,
-                    proposal_info.clone()
-                );
-
-                proposal_ids_map.insert(
-                    neuron_id.id,
-                    ()
-                );
-            }
-        });
-    });
+                *last_proposal_id_sent_ref = neuron_id.id;
+            });
+        }
+    }
 }
 
-fn process_proposal_info(
+async fn process_proposal_info(
     neuron_id: u128,
     proposal_info: ProposalInfo
 ) {
-    ic_cdk::spawn(async move {
-        let canister_id = get_group_canister_id(proposal_info.topic);
+    let canister_id = get_group_canister_id(proposal_info.topic);
 
-        let call_result = send_message_to_group(
-            &canister_id,
+    let call_result = send_message_to_group(
+        &canister_id,
+        neuron_id,
+        &format_proposal_message(
             neuron_id,
-            &format_proposal_message(
-                neuron_id,
-                proposal_info.proposal
-            )
-        ).await;
+            proposal_info.proposal
+        )
+    ).await;
 
-        SEND_MESSAGE_RESPONSE_REF.with(|send_message_response_ref| {
-            let mut send_message_response = send_message_response_ref.borrow_mut();
+    SEND_MESSAGE_RESPONSE_REF_CELL.with(|send_message_response_ref_cell| {
+        let mut send_message_response_ref = send_message_response_ref_cell.borrow_mut();
 
-            *send_message_response = format!("{:#?}", call_result);
-        })
+        *send_message_response_ref = (time(), format!("{:#?}", call_result));
     });
 }
 
