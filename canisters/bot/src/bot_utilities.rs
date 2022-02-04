@@ -2,6 +2,7 @@ use crate::{
     constants::{
         GOVERNANCE_BOT_USER_CANISTER_ID,
         GOVERNANCE_BOT_USER_NAME,
+        GOVERNANCE_CANISTER_ID,
         USER_INDEX_CANISTER_ID
     },
     types::{
@@ -11,7 +12,10 @@ use crate::{
         CurrentUserResponse,
         JoinGroupArgs,
         JoinGroupResponse,
+        ListProposalInfo,
+        ListProposalInfoResponse,
         MessageContent,
+        ProposalInfo,
         RegisterUserArgs,
         RegisterUserResponse,
         SendMessageArgs,
@@ -98,4 +102,24 @@ async fn send_message(
     ).await;
 
     format!("{:#?}", call_result)
+}
+
+#[update]
+async fn list_proposals() -> Result<Vec<ProposalInfo>, String> {
+    let call_result: Result<(ListProposalInfoResponse,), _> = ic_cdk::api::call::call(
+        ic_cdk::export::Principal::from_text(GOVERNANCE_CANISTER_ID).unwrap(),
+        "list_proposals",
+        (ListProposalInfo {
+            include_reward_status: vec![],
+            before_proposal: None,
+            limit: 1,
+            exclude_topic: vec![],
+            include_status: vec![]
+        },)
+    ).await;
+
+    match call_result {
+        Ok(value) => Ok(value.0.proposal_info),
+        Err(error) => Err(error.1)
+    }
 }

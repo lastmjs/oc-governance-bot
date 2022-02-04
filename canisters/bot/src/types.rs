@@ -120,6 +120,20 @@ pub enum JoinGroupResponse {
 }
 
 #[derive(CandidType, Deserialize)]
+pub struct ListProposalInfo {
+    pub include_reward_status: Vec<i32>,
+    pub before_proposal: Option<NeuronId>,
+    pub limit: u32,
+    pub exclude_topic: Vec<i32>,
+    pub include_status: Vec<i32>
+}
+
+#[derive(CandidType, Deserialize)]
+pub struct ListProposalInfoResponse {
+    pub proposal_info: Vec<ProposalInfo>
+}
+
+#[derive(CandidType, Deserialize)]
 pub enum MessageContent {
     Text(TextContent)
 }
